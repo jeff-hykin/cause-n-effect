@@ -1,2 +1,2 @@
-# live-
-easy two way (live) databinding in Javascript
+# cause-n-effect
+Perfect two way databinding in Javascript
