@@ -1,0 +1,23 @@
+{
+  "name": "live-",
+  "version": "1.0.0",
+  "description": "easy two way data binding ",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeff-hykin/live-.git"
+  },
+  "keywords": [
+    "databinding",
+    "two-way"
+  ],
+  "author": "Jeff Hykin",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jeff-hykin/live-/issues"
+  },
+  "homepage": "https://github.com/jeff-hykin/live-#readme"
+}
