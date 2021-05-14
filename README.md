@@ -92,7 +92,7 @@ let smartData = makeObservable(
 // list of functions
 Observable.listeners(smartData)
 
-// add an additionall callback
+// add an additional callback
 Observable.listeners(smartData).push((keyList, value)=>{ /* do something */ })
 ```
 
