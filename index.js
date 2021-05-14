@@ -1,121 +1,113 @@
-// if running inside node
-if (typeof window == "undefined") {
-    window = global
-}
-
-let liveValuesOf = Symbol("liveValuesOf")
-let valueOf      = Symbol("liveValueOf")
-let listenersOf  = Symbol("liveListenersOf")
-window[liveValuesOf] = {}
-window[valueOf]      = {}
-window[listenersOf]  = {}
-// TODO add support for checking nested values
-class LiveValue {
-    constructor(intialValue) {
-        this.sourceId = Symbol()
-        window[valueOf][this.sourceId] = intialValue
-        window[listenersOf][this.sourceId] = new Set()
-        window[liveValuesOf][this.sourceId] = new Set([this])
-    }
-    unbind() {
-        this.sourceId = Symbol()
-        window[listenersOf][this.sourceId] = new Set()
-        window[liveValuesOf][this.sourceId] = new Set([this])
-    }
-    bindTo(newLiveValue) {
-        let oldSourceId = this.sourceId
-        let newSourceId = newLiveValue.sourceId
-        if (oldSourceId != newSourceId) {
-            this.sourceId = newLiveValue.sourceId
-            // 
-            // Update live values
-            // 
-            for (let each of window[liveValuesOf][oldSourceId]) {
-                // change local binding
-                each.sourceId = newSourceId
-                // change global binding
-                window[liveValuesOf][newSourceId].add(each)
-            }
-            //
-            // Update listeners
-            //
-            // move listeners
-            let listenersBeforeBinding = []
-            for (let each of window[listenersOf][oldSourceId]) {
-                listenersBeforeBinding.push(each)
-                window[listenersOf][oldSourceId].add(oldSourceId)
-            }
-            // call this listeners for everything that changed binding
-            // TODO, this is syncronous, it should maybe be async
-            listenersBeforeBinding.forEach(each=>each(window[valueOf][newSourceId]))
-        }
-    }
-    set value(newValue) {
-        // set the new value
-        window[valueOf][this.sourceId] = newValue
-        // run all the listeners
-        for (let each of this.listeners) {
-            each(newValue)
-        }
-    }
-    get value() {
-        return window[valueOf][this.sourceId]
-    }
-    valueOf() {
-        return this.value
-    }
-    addListener(aFunction) {
-        window[listenersOf][this.sourceId].add(aFunction)
-    }
-    removeListener() {
-        window[listenersOf][this.sourceId].delete(aFunction)
-    }
-    get listeners() {
-        return window[listenersOf][this.sourceId]
+let Observable
+Observable = {
+    listenersSymbol: Symbol("Observable.listenersSymbol"),
+    listeners(object) {
+        return object[Observable.listenersSymbol]
     }
 }
-function LiveManager() {
-    return new Proxy({}, {
-            ownKeys : (target)=>Reflect.ownKeys(target),
-            has : (target, key)=>key in target,
-            set : function (target, key, newValue) {
-                    if (newValue instanceof LiveValue) {
-                        // if there is no existing value
-                        if (target[key] == null) {
-                            // just assign it
-                            target[key] = newValue
-                        // if there is an existing value, then overwrite the old with the new
-                        } else {
-                            target[key].bindTo(newValue)
+let hookIntoChildChanges = (key, object) => (keyList, value)=>{
+    const newKeyList = [key, ...keyList]
+    for (let each of object[Observable.listenersSymbol]) {
+        if (each instanceof Function) {
+            each(newKeyList, value)
+        }
+    }
+}
+function makeObservable(object, onChange) {
+    if (object instanceof Array) {
+        return makeProxyArray(object, onChange)
+    } else if (object instanceof Object) {
+        return makeProxyObject(object, onChange)
+    } else {
+        return object
+    }
+}
+function makeProxyArray(existingObject, onChange) {
+    let copy = []
+    copy[Observable.listenersSymbol] = [onChange]
+    for (const [key, value] of Object.entries(existingObject)) {
+        copy[key] = makeObservable(value, hookIntoChildChanges(key, copy))
+    }
+    let proxyObject
+    proxyObject = new Proxy(copy, {
+        get(target, key) {
+            const beforeMutation = [...target]
+            switch (key) {
+                case 'fill': 
+                case 'sort': 
+                case 'flat': 
+                case 'pop': 
+                case 'push': 
+                case 'reverse': 
+                case 'shift': 
+                case 'unshift': 
+                    const action = key
+                    return (...args)=>{
+                        const result = target[action](...args)
+                        const keys = new Set([ ...Object.keys(target), ...Object.keys(beforeMutation) ])
+                        // check changes 
+                        // TODO: make this more efficient, this is O(n) but some (like pop) are O(1)
+                        for (const key of keys) {
+                            // then there was a change
+                            if (beforeMutation[key] !== target[key]) {
+                                // make it observable
+                                target[key] = makeObservable(target[key], hookIntoChildChanges(key, target))
+                                // report the change
+                                for (let each of target[Observable.listenersSymbol]) {
+                                    if (each instanceof Function) {
+                                        each([key], target[key])
+                                    }
+                                }
+                            }
                         }
-                    // if its a normal value
-                    } else {
-                        // if there is no existing value
-                        if (target[key] == null) {
-                            // create a live value
-                            target[key] = new LiveValue(newValue)
-                        // if there is an existing value, then overwrite the old with the new
-                        } else {
-                            target[key].value = newValue
-                        }
+                        return result
                     }
-                },
-            get :(target, key) => target[key],
-            construct : ()=> this
-        }
-    )
+                default:
+                    break
+            }
+            return target[key]
+        },
+        set(target, key, newValue) {
+            // always convert
+            target[key] = makeObservable(newValue, hookIntoChildChanges(key, target))
+            for (let each of target[Observable.listenersSymbol]) {
+                if (each instanceof Function) {
+                    each([key], newValue)
+                }
+            }
+            return target[key]
+        },
+    })
+    return proxyObject
+}
+function makeProxyObject(existingObject, onChange) {
+    let copy = {}
+    copy[Observable.listenersSymbol] = [onChange]
+    
+    for (const [key, value] of Object.entries(existingObject)) {
+        // connect child changes
+        copy[key] = makeObservable(value, hookIntoChildChanges(key, copy))
+    }
+    let proxyObject 
+    proxyObject = new Proxy(copy, {
+        get(target, key) {
+            return target[key]
+        },
+        set(target, key, newValue) {
+            // always convert
+            target[key] = makeObservable(newValue, hookIntoChildChanges(key, target))
+            for (let each of target[Observable.listenersSymbol]) {
+                if (each instanceof Function) {
+                    each([key], target[key])
+                }
+            }
+            return target[key]
+        },
+    })
+    return proxyObject
 }
 
-
-
-function attachTo(context) {
-    context.LiveManager = LiveManager
-    context.LiveValue = LiveValue
-}
-// if there is no exporting system
-if(typeof exports == "undefined"){
-    attachTo(window)
-// if there is an export system
-} else {
-    attachTo(module.exports)
+module.exports = {
+    makeObservable,
+    Observable,
 }

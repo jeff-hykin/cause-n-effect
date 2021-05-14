@@ -1,7 +1,7 @@
 {
     "name": "cause-n-effect",
-    "version": "1.0.0",
-    "description": "Pefect two way data binding",
+    "version": "2.0.0",
+    "description": "Listen to nested data changes",
     "main": "index.js",
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1"
@@ -12,7 +12,9 @@
     },
     "keywords": [
         "databinding",
-        "two-way"
+        "listeners",
+        "observable",
+        "changes"
     ],
     "author": "Jeff Hykin",
     "license": "ISC",
