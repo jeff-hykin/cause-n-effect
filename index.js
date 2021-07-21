@@ -164,6 +164,7 @@ function Reactive() {
                         }
                     }
                 }
+                reactiveData.value = newValue
                 reactiveData.onSet()
             // 
             // to object
