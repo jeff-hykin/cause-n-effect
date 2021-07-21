@@ -173,12 +173,10 @@ function Reactive() {
                 // if new value is a reactive
                 // 
                 if (newValue[ReactiveDataSymbol]) {
-
-                    // FIXME: make this an error, say it either needs to be a deep copy, or needs to use the bind function
-                    // or just make it perform a copy, and freeze the other reactable, with an error explaination when trying to perform stuff
-                    newValue[ReactiveDataSymbol].frozen = self
-                    // FIXME: need to freeze things all the way down
-
+                    // assign it to a copy
+                    reactiveData.value = Reactive()(JSON.parse(JSON.stringify(newValue)))()
+                    newValue[ReactiveDataSymbol].frozen = reactiveData.value
+                    Object.freeze(newValue[ReactiveDataSymbol].internal)
                 // if its non-reactive
                 } else {
                     // freeze the original
@@ -278,6 +276,7 @@ function Reactive() {
                     }
                 }
             }
+            return self
         }
     }
     Object.defineProperties(self, {
@@ -320,7 +319,10 @@ function Reactive() {
                 internal.parents = linkedValue[ReactiveDataSymbol].parents
                 // merge the frozenness
                 internal.frozen = linkedValue[ReactiveDataSymbol].frozen = newValue[ReactiveDataSymbol] || internal.frozen
-                // FIXME: frozenness probably needs to go all the way down
+                if (internal.frozen) {
+                    Object.freeze(internal.value)
+                    Object.freeze(linkedValue[ReactiveDataSymbol].internal)
+                }
             },
             enumerable: false,
             configurable: false,
