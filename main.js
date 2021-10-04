@@ -22,7 +22,7 @@ const convertToReactiveContainer = (data, self) => {
 }
 
 function Reactive({initialValue, onUpdate}) {
-    const self = (value)=>self.setValue(value)
+    const self = (...args)=>self.setValue(...args)
     // reactive attributes
     Object.assign(self, {
         [isReactiveSymbol]: self,
@@ -79,8 +79,9 @@ function Reactive({initialValue, onUpdate}) {
         },
         update(changes) {
             // run all the parent callbacks
-            for (const eachParent of self.parents) {
+            for (const eachParent of self.parents.values()) {
                 for (const [key, eachParentCallback] of Object.entries(eachParent)) {
+                    console.debug(`eachParentCallback is:`,eachParentCallback)
                     eachParentCallback(
                         // add the key to the keylist before calling
                         changes.map(([ keyList, newValue, oldValue ])=>[[key, ...keyList], newValue, oldValue])
@@ -88,7 +89,7 @@ function Reactive({initialValue, onUpdate}) {
                 }
             }
             // run all the custom callbacks
-            for (const each of onUpdate) {
+            for (const each of self.onUpdate) {
                 try {
                     each(changes)
                 } catch (error) {}
@@ -98,10 +99,11 @@ function Reactive({initialValue, onUpdate}) {
             // FIXME: add the functional watcher here (e.g. did thing.thing.thing change)
         },
         onUpdate: onUpdate ? [onUpdate] : [],
-        whenKeyUpdated: whenKeyUpdated ? [whenKeyUpdated] : [],
-        whenKeyValueChanges: whenKeyValueChanges ? [whenKeyValueChanges] : [],
+        // whenKeyUpdated: whenKeyUpdated ? [whenKeyUpdated] : [],
+        // whenKeyValueChanges: whenKeyValueChanges ? [whenKeyValueChanges] : [],
     })
     self.$ = convertToReactiveContainer(initialValue, self)
+    console.debug(`self.$ is:`,self.$)
     return self
 }
 
@@ -297,7 +299,7 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
         // FIXME: maybe need to add all other array methods and return reactive versions of the results
     }
     // attach a bunch of things to emulate an array
-    self.$ = Proxy(self.untrackedValue, {
+    self.$ = new Proxy(self.untrackedValue, {
         get(target, key) {
             return priorityObject[key] || target[key]
         },
@@ -331,12 +333,12 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
 
 Object.prototype[makeReactiveSymbol] = (value, self) => {
     
-    for (const [key, value] of Object.entries(value)) {
+    for (const [key, each] of Object.entries(value)) {
         self.adopt(key, each[isReactiveSymbol] || Reactive({initialValue: each}))
     }
     
     // wrap an object
-    self.$ = Proxy(self.children, {
+    self.$ = new Proxy(self.children, {
         set(target, key, newValue) {
             const valueBefore = key in target ? target[key] : doesntExist
             // if the value existed, disown it
