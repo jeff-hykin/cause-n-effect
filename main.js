@@ -21,8 +21,6 @@ const convertToReactiveContainer = (data, self) => {
     }
 }
 
-// data needs to be the proxy or primitive
-
 function Reactive({initialValue, onUpdate}) {
     const self = (value)=>self.setValue(value)
     // reactive attributes
@@ -300,14 +298,61 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
     }
     // attach a bunch of things to emulate an array
     self.$ = Proxy(self.untrackedValue, {
-        // FIXME: proxy stuff
-        // Getter
-            // prioritize the priorityObject
-        // Setter
-            // track each assignment
-            // track the length assignment
-        // Deleter
-            // track 
+        get(target, key) {
+            return priorityObject[key] || target[key]
+        },
+        set(target, key, newValue) {
+            const valueBefore = key in target ? target[key] : doesntExist
+            const lengthBefore = target.length
+            const changes = []
+            // if the value existed, disown it
+            if (valueBefore != doesntExist) {
+                self.disown(key)
+            }
+            target[key] = newValue[isReactiveSymbol] || Reactive({initialValue: newValue})
+            if (lengthBefore != target.length) {
+                changes.push([["length"], target.length, lengthBefore])
+            }
+            // FIXME: edgecase; a = [1], a[99] = 10, creates a bunch of "empty" items
+            if (valueBefore !== target[key]) {
+                changes.push([[key], target[key], valueBefore ])
+            }
+            self.adopt(key, target[key])
+            self.update(changes)
+        },
+        delete(target, key) {
+            self.disown(key)
+            delete target[key]
+        },
+    })
+    
+    return self.$
+}
+
+Object.prototype[makeReactiveSymbol] = (value, self) => {
+    
+    for (const [key, value] of Object.entries(value)) {
+        self.adopt(key, each[isReactiveSymbol] || Reactive({initialValue: each}))
+    }
+    
+    // wrap an object
+    self.$ = Proxy(self.children, {
+        set(target, key, newValue) {
+            const valueBefore = key in target ? target[key] : doesntExist
+            // if the value existed, disown it
+            if (valueBefore != doesntExist) {
+                self.disown(key)
+            }
+            target[key] = newValue[isReactiveSymbol] || Reactive({initialValue: newValue})
+            if (valueBefore !== target[key]) {
+                changes.push([[key], target[key], valueBefore ])
+            }
+            self.adopt(key, target[key])
+            self.update(changes)
+        },
+        delete(target, key) {
+            self.disown(key)
+        },
     })
     
     return self.$
