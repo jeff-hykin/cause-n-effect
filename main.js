@@ -81,10 +81,9 @@ function Reactive({initialValue, onUpdate}) {
             // run all the parent callbacks
             for (const eachParent of self.parents.values()) {
                 for (const [key, eachParentCallback] of Object.entries(eachParent)) {
-                    console.debug(`eachParentCallback is:`,eachParentCallback)
                     eachParentCallback(
                         // add the key to the keylist before calling
-                        changes.map(([ keyList, newValue, oldValue ])=>[[key, ...keyList], newValue, oldValue])
+                        changes.map(([ keyList, newValue, oldValue, baseList ])=>[[key, ...keyList], newValue, oldValue, baseList||keyList])
                     )
                 }
             }
@@ -95,15 +94,30 @@ function Reactive({initialValue, onUpdate}) {
                 } catch (error) {}
             }
             
-            // FIXME: check for recursive updates
-            // FIXME: add the functional watcher here (e.g. did thing.thing.thing change)
+            // 
+            // run the watchers
+            // 
+            // create a fail-fast tool
+                // FIXME
+                //    1. attach watcher on adopt 
+                //    2. deattach watcher on disown
+                //    3. trigger watcher on higher-up getting downgraded from object to primitive
+                //    4. attach watcher on watch
+                //    5. test the edgecase of .length for arrays
+        },
+        watchers: new Map(), // keys are keyLists, values are [prevValue, a set of callbacks]
+        watch(keyList, callback) {
+            const callbacks = self.watchers.get(keyList) || new Set()
+            callbacks.add(callback)
+            self.watchers.set(keyList, callbacks)
         },
         onUpdate: onUpdate ? [onUpdate] : [],
         // whenKeyUpdated: whenKeyUpdated ? [whenKeyUpdated] : [],
         // whenKeyValueChanges: whenKeyValueChanges ? [whenKeyValueChanges] : [],
+        // TODO: add toJson
+        // TODO: add get(keyList)
     })
     self.$ = convertToReactiveContainer(initialValue, self)
-    console.debug(`self.$ is:`,self.$)
     return self
 }
 
@@ -359,14 +373,6 @@ Object.prototype[makeReactiveSymbol] = (value, self) => {
     
     return self.$
 }
-
-
-// Complex
-// - Object
-// - Array
-// - date
-// - regex
-
 
 function isPrimitive(value) {
     const type = typeof value
