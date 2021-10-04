@@ -112,7 +112,7 @@ function makeProxyObject(existingObject, onChange) {
 
 
 const ReactiveDataSymbol = Symbol("Internal")
-function Reactive() {
+function Reactive(args={value:undefined, onSet:null}) {
     const reactiveData = {
         value: undefined,
         onSet: undefined,
@@ -130,9 +130,9 @@ function Reactive() {
         }
         for (const each of reactiveData.onSetCallbacks) {
             // skip if already called somewhere else
-            if (!alreadyCalledBacks.has(each)) {
+            if (!alreadyCalledReactives.has(each)) {
                 each(reactiveData.value)
-                alreadyCalledBacks.add(each)
+                alreadyCalledReactives.add(each)
             }
         }
         // call all parents onSet
@@ -287,17 +287,19 @@ function Reactive() {
             configurable: false,
             writable: false,
         },
-        addListener: {
-            value: (...args) => {
-                internal.onSetCallbacks.add(args.slice(-1)[0])
+        addEventListener: {
+            value: (eventName, callbackFunction) => {
+                if (eventName == 'onSet') {
+                    reactiveData.onSetCallbacks.add(callbackFunction)
+                }
             },
             enumerable: false,
             configurable: false,
             writable: false,
         },
-        removeListener: {
-            value: (...args) => {
-                internal.onSetCallbacks.remove(args.slice(-1)[0])
+        removeEventListener: {
+            value: (eventName, callbackFunction) => {
+                reactiveData.onSetCallbacks.remove(callbackFunction)
             },
             enumerable: false,
             configurable: false,
@@ -309,20 +311,20 @@ function Reactive() {
                     throw Error(`called:\n    (reactive).link(linkedValue)\nbut the value wasn't a reactive. It was: ${linkedValue}, which in json is: ${JSON.stringify(linkedValue)}`)
                 }
                 // merge the callbacks
-                for (const each of internal.onSetCallbacks) {
+                for (const each of reactiveData.onSetCallbacks) {
                     linkedValue[ReactiveDataSymbol].onSetCallbacks.add(each)
                 }
-                internal.onSetCallbacks = linkedValue[ReactiveDataSymbol].onSetCallbacks
+                reactiveData.onSetCallbacks = linkedValue[ReactiveDataSymbol].onSetCallbacks
                 // merge the parents
-                for (const each of internal.parents) {
+                for (const each of reactiveData.parents) {
                     linkedValue[ReactiveDataSymbol].parents.add(each)
                 }
-                internal.parents = linkedValue[ReactiveDataSymbol].parents
+                reactiveData.parents = linkedValue[ReactiveDataSymbol].parents
                 // merge the frozenness
-                internal.frozen = linkedValue[ReactiveDataSymbol].frozen = newValue[ReactiveDataSymbol] || internal.frozen
-                if (internal.frozen) {
-                    Object.freeze(internal.value)
-                    Object.freeze(linkedValue[ReactiveDataSymbol].internal)
+                reactiveData.frozen = linkedValue[ReactiveDataSymbol].frozen = newValue[ReactiveDataSymbol] || reactiveData.frozen
+                if (reactiveData.frozen) {
+                    Object.freeze(reactiveData.value)
+                    Object.freeze(linkedValue[ReactiveDataSymbol])
                 }
             },
             enumerable: false,
@@ -353,8 +355,84 @@ function Reactive() {
             writable: false,
         },
     })
+
+    // 
+    // handle arguments
+    // 
+    self(args.value)
+    if (args.onSet instanceof Function) {
+        self.addEventListener("onSet", args.onSet)
+    }
     return self
 }
+
+function FunctionalData({ initialValue, onSetOf, updateValueUsing, }) {
+    let reactiveData = Reactive({value: initialValue})
+    for (const each of onSetOf) {
+        each.addEventListener("onSet", ()=>{
+            reactiveData(updateValueUsing())
+        })
+    }
+    // wrap the output 
+    let wrapper = ()=>{reactiveData()}
+    Object.defineProperties(wrapper, {
+        [ReactiveDataSymbol]: {
+            value: reactiveData[ReactiveDataSymbol],
+            enumerable: false,
+            configurable: false,
+            writable: false,
+        },
+        addEventListener: {
+            value: reactiveData.addEventListener,
+            enumerable: false,
+            configurable: false,
+            writable: false,
+        },
+        removeEventListener: {
+            value: reactiveData.removeEventListener,
+            enumerable: false,
+            configurable: false,
+            writable: false,
+        },
+        toJSON: {
+            value: reactiveData.toJSON,
+            enumerable: false,
+            configurable: false,
+            writable: false,
+        },
+    })
+    return wrapper
+}
+
+let reactive1 = Reactive({
+    value: {
+        a: { a_a: "nested", a_b: "" },
+        c: 10,
+    },
+    onSet: (...args)=>{
+        console.debug(`args is:`,args)
+        console.log(`reactive 1 changed!`)
+    }
+})
+
+reactive1({
+    c: 10,
+})
+
+
+let fullName = FunctionalData({
+    onSetOf: [ reactive1 ],
+    updateValueUsing: () => {
+        let newValue = reactive1() + 1
+        return newValue
+    }
+})
+
+// TODO: note how a thing changed
+// add a value watcher
+// add a functional data
+
+console.debug(`reactive1 is:`,reactive1())
 
 module.exports = {
     makeObservable,

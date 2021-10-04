@@ -22,5 +22,8 @@
         "url": "https://github.com/jeff-hykin/cause-n-effect/issues"
     },
     "homepage": "https://github.com/jeff-hykin/cause-n-effect#readme",
-    "private" : false
+    "private": false,
+    "dependencies": {
+        "lodash": "^4.17.21"
+    }
 }
