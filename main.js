@@ -3,83 +3,146 @@ const makeReactiveSymbol = Symbol("make-reactive")
 const doesntExist        = Symbol("doesnt-exist")
 
 // 
+// Object watcher
 // 
-// tests
-// 
-// 
-    // let a = Reactive({initialValue: {a:"hi", b:[1,2,3,4,5]}})
-    // a.onUpdate.push((changes)=> {  console.log("this changed:", changes)  })
-
-const convertToReactiveContainer = (data, self) => {
-    if (isPrimitive(data)) {
-        return data
-    } else if (data[makeReactiveSymbol] instanceof Function) {
-        return data[makeReactiveSymbol](data, self)
-    } else {
-        // TODO: add more explaination of what to do
-        throw Error(`I'm not sure how to make this value reactive\nconstructor name: ${data.constructor.name}\nvalue: ${data}\n\nIf this is a custom class, please add a [Reactive.makeReactiveSymbol] key to the class that converts it to a reactive value`)
+Object.prototype[makeReactiveSymbol] = (value, theReactiveItem) => {
+    // populate the children
+    for (const [key, each] of Object.entries(value)) {
+        theReactiveItem.adopt(key, each)
     }
+
+    // wrap the primitive object with a proxy
+    return new Proxy(theReactiveItem.children, {
+        get(original, key, ...args) {
+            return Reflect.get(original, key, ...args)
+        },
+        set(original, key, newValue) {
+            console.debug(`key is:`,key)
+            console.debug(`newValue is:`,newValue)
+            const oldValue = key in original ? original[key] : doesntExist
+            // if its a new value, disown the old one
+            let shouldTriggerUpdate = false
+            if (oldValue != doesntExist && oldValue !== newValue) {
+                shouldTriggerUpdate = true
+                theReactiveItem.disown(key)
+            }
+            // either way adopt the new value
+            theReactiveItem.adopt(key, newValue)
+            // trigger update if there was a change
+            shouldTriggerUpdate && theReactiveItem.triggerUpdate([
+                [[key], original[key], oldValue ]
+            ])
+        },
+        delete(original, key) {
+            const oldValue = key in original ? original[key] : doesntExist
+            theReactiveItem.disown(key)
+            theReactiveItem.triggerUpdate([
+                [[key], doesntExist, oldValue ]
+            ])
+        },
+    })
 }
 
+// 
+// 
+// Reactive
+// 
+// 
 function Reactive({initialValue, onUpdate}) {
-    const self = (...args)=>self.setValue(...args)
+    let init = true
+    // if initial value is reactive just immediately use it, don't double-wrap
+    if (initialValue instanceof Object && initialValue[isReactiveSymbol]) {
+        if (onUpdate instanceof Function) {
+            initialValue.updateListeners.push(onUpdate)
+        }
+        return initialValue
+    } 
+    const thisReactiveItem = (...args)=>thisReactiveItem.setValue(...args)
     // reactive attributes
-    Object.assign(self, {
-        [isReactiveSymbol]: self,
+    Object.assign(thisReactiveItem, {
+        [isReactiveSymbol]: thisReactiveItem,
+        $: undefined, // $ will be equal to a proxy
         setValue(...args) {
-            if (args.length == 0) { return self.$ }
+            if (args.length == 0) { return thisReactiveItem.$ }
             const [newValue] = args
+            const newValueIsPrimitive = isPrimitive(newValue)
             // if downgrading from object to primitive, disown all children
-            if (!self.isPrimitive && isPrimitive(newValue)) {
-                self.disownAll()
+            if (!thisReactiveItem.isPrimitive && isPrimitive(newValue)) {
+                thisReactiveItem.disownAll()
             }
             
             // TODO: what to do if given a reactive as a newValue
 
             // if something changed
-            if (newValue !== self.$) {
-                const oldValue = self.$
-                // the top level will be vanilla javascript, but the values (object/array) will all be reactives
-                self.$ = convertToReactiveContainer(newValue, self)
+            if (newValue !== thisReactiveItem.$) {
+                const oldValue = thisReactiveItem.$
+                if (newValueIsPrimitive) {
+                    thisReactiveItem.$ = newValue
+                    thisReactiveItem.isPrimitive = true
+                } else if (newValue[makeReactiveSymbol] instanceof Function) {
+                    thisReactiveItem.$ = newValue[makeReactiveSymbol](newValue, thisReactiveItem)
+                    thisReactiveItem.isPrimitive = false
+                } else {
+                    // TODO: add more explaination of what to do
+                    throw Error(`I'm not sure how to make this value reactive\nconstructor name: ${data.constructor.name}\nvalue: ${data}\n\nIf this is a custom class, please add a [Reactive.makeReactiveSymbol] key to the class that converts it to a reactive value`)
+                }
                 // tell about the update
-                self.update([
+                thisReactiveItem.triggerUpdate([
                     [[], newValue, oldValue ],
                 ])
             }
-            
-            return self
+            return thisReactiveItem
         },
-        $: initialValue,
+        grab(keyList) {
+            let runningValue = thisReactiveItem
+            try {
+                while (keyList.length) {
+                    const next = keyList.shift()
+                    runningValue = runningValue.$[next]
+                }
+            } catch (error) {
+                return doesntExist
+            }
+            return runningValue.$
+        },
         isPrimitive: isPrimitive(initialValue),
-        children: {}, // key is well, the key/attribute, value is a reactive.self
-        parents: new Map(), // keys are Reactives.self, value is a object of callback functions, each callback is bundled with a relationship (encase two keys point to the same child)
+        children: {}, // key is well, the key/attribute, value is always a reactive
+        parents: new Map(), // keys are Reactives.thisReactiveItem (<- the parent), value is a object of keys (key being parent[key]=this) with values being callback functions
         disown(childKey) {
-            // remove self as parent
-            const parents = self.children[childKey].parents
-            const parentConnection = parents.get(self)
+            // remove thisReactiveItem as parent
+            const parents = thisReactiveItem.children[childKey].parents
+            const parentConnection = parents.get(thisReactiveItem)
             delete parentConnection[childKey]
             // remove child
-            delete self.children[childKey]
+            delete thisReactiveItem.children[childKey]
         },
         adopt(childKey, child) {
-            self.children[childKey] = child
+            thisReactiveItem.children[childKey] = Reactive({initialValue: child})
             
             // add a parent relationship
             // create object if its not there (sometimes the same child exists under two different names)
-            if (!(self.children[childKey].parents.get(self) instanceof Object)) {
-                self.children[childKey].parents.set(self, {})
+            if (!(thisReactiveItem.children[childKey].parents.get(thisReactiveItem) instanceof Object)) {
+                thisReactiveItem.children[childKey].parents.set(thisReactiveItem, {})
             }
             // add the onUpdate callback
-            self.children[childKey].parents.get(self)[childKey] = self.update
+            thisReactiveItem.children[childKey].parents.get(thisReactiveItem)[childKey] = thisReactiveItem.triggerUpdate
         },
         disownAll() {
-            for (const each of self.children) {
-                self.disown(each)
+            const changes = []
+            for (const [key, value] of Object.entries()) {
+                changes.push([[key], doesntExist, value])
+                thisReactiveItem.disown(key)
             }
+            return changes
         },
-        update(changes) {
+        triggerUpdate(changes) {
+            // don't trigger on init
+            if (init) {
+                init = false
+                return
+            }
             // run all the parent callbacks
-            for (const eachParent of self.parents.values()) {
+            for (const eachParent of thisReactiveItem.parents.values()) {
                 for (const [key, eachParentCallback] of Object.entries(eachParent)) {
                     eachParentCallback(
                         // add the key to the keylist before calling
@@ -88,7 +151,7 @@ function Reactive({initialValue, onUpdate}) {
                 }
             }
             // run all the custom callbacks
-            for (const each of self.onUpdate) {
+            for (const each of thisReactiveItem.updateListeners) {
                 try {
                     each(changes)
                 } catch (error) {}
@@ -104,23 +167,48 @@ function Reactive({initialValue, onUpdate}) {
                 //    3. trigger watcher on higher-up getting downgraded from object to primitive
                 //    4. attach watcher on watch
                 //    5. test the edgecase of .length for arrays
+                //    6. every time a parent reactive value changes, check watcher, detach old and reattach new if changed
         },
         watchers: new Map(), // keys are keyLists, values are [prevValue, a set of callbacks]
         watch(keyList, callback) {
-            const callbacks = self.watchers.get(keyList) || new Set()
+            const callbacks = thisReactiveItem.watchers.get(keyList) || new Set()
             callbacks.add(callback)
-            self.watchers.set(keyList, callbacks)
+            thisReactiveItem.watchers.set(keyList, callbacks)
         },
-        onUpdate: onUpdate ? [onUpdate] : [],
+        updateListeners: onUpdate ? [onUpdate] : [],
         // whenKeyUpdated: whenKeyUpdated ? [whenKeyUpdated] : [],
         // whenKeyValueChanges: whenKeyValueChanges ? [whenKeyValueChanges] : [],
-        // TODO: add toJson
-        // TODO: add get(keyList)
+        toObject(scheduled=new Map()) {
+            if (thisReactiveItem.isPrimitive) {
+                return thisReactiveItem.$
+            } else {
+                let value = {}
+                scheduled.set(thisReactiveItem, value)
+                console.debug(`Object.entries(thisReactiveItem.children) is:`,Object.entries(thisReactiveItem.children))
+                for (const [key, childValue] of Object.entries(thisReactiveItem.children)) {
+                    // if already visited
+                    if (scheduled.has(childValue)) {
+                        value[key] = scheduled.get(childValue)
+                    } else {
+                        value[key] = childValue.toObject(scheduled)
+                    }
+                }
+                return value
+            }
+        },
+        toJSON(...args) {
+            return JSON.stringify(thisReactiveItem.toObject(),...args)
+        }
     })
-    self.$ = convertToReactiveContainer(initialValue, self)
-    return self
+    thisReactiveItem.setValue(initialValue)
+    return thisReactiveItem
 }
+// attach for external use
+Reactive.doesntExist = doesntExist
 
+// 
+// Array Watcher
+// 
 Array.prototype[makeReactiveSymbol] = (value, self) => {
     // recursively convert each thing to be reactive
     // create a relationship-callback and attach it to each of the children
@@ -129,7 +217,7 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
     for (const each of value) {
         const address = index++
         // if it wasn't reactive, then make it reactive
-        const child = each[isReactiveSymbol] || Reactive({initialValue: each})
+        const child = Reactive({initialValue: each})
         // add the child
         self.adopt(address, child)
         self.untrackedValue.push(child)
@@ -149,7 +237,7 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
                 self.adopt(index, newValue)
             }
         }
-        changes.length && self.update(changes)
+        changes.length && self.triggerUpdate(changes)
         return changes
     }
     
@@ -157,7 +245,7 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
         fill(value, start=0, end=undefined) {
             if (end === undefined || end > self.untrackedValue.length) { end = self.untrackedValue.length }
             const changes = []
-            const newValue = ((value instanceof Object) && value[isReactiveSymbol]) || Reactive({data: value})
+            const newValue = Reactive({data: value})
             // FIXME: handle negative numbers https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/fill
             while (end > start) {
                 const key = start++
@@ -172,7 +260,7 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
             }
             self.untrackedValue.fill(newValue, start, end)
             // call the update if any changes were made
-            changes.length && self.update(changes)
+            changes.length && self.triggerUpdate(changes)
             return self
         },
         sort(...args) {
@@ -183,7 +271,7 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
         pop() {
             const oldValue = self.untrackedValue.pop()
             const index = self.untrackedValue.length
-            self.update([
+            self.triggerUpdate([
                 [["length"], index, index+1 ],
                 [[index], doesntExist, oldValue ],
             ])
@@ -192,13 +280,13 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
         },
         push(...newValues) {
             // ensure the value is reactive before saving it
-            newValues = newValues.map( newValue => newValue[isReactiveSymbol] || Reactive({initialValue: newValue}) )
+            newValues = newValues.map( newValue => Reactive({initialValue: newValue}) )
             const index = self.untrackedValue.length
             for (const [newishIndex, newValue] of Object.entries(newValues)) {
                 self.adopt(index+newishIndex, newValue)
             }
             self.untrackedValue.push(...newValues)
-            self.update([
+            self.triggerUpdate([
                 [["length"], index+newValues.length, index ],
                 ...newValues.map((newValue, index)=>[ [index], newValue, doesntExist ]),
             ])
@@ -232,13 +320,13 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
                 // manually do the last one
                 changes.push([[self.untrackedValue.length], doesntExist, self.untrackedValue.slice(-1) ])
                 self.disown(self.untrackedValue.length)
-                self.update(changes)
+                self.triggerUpdate(changes)
                 return oldValue
             }
         },
         unshift(...newValues) {
             // convert them to be reactive
-            newValues = newValues.map( newValue => newValue[isReactiveSymbol] || Reactive({initialValue: newValue}) )
+            newValues = newValues.map( newValue => Reactive({initialValue: newValue}) )
             const changes = [
                 [["length"], self.untrackedValue.length+newValues.length, self.untrackedValue.length]
             ]
@@ -273,7 +361,7 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
                     self.adopt(index, newValue)
                 }
             }
-            self.update(changes)
+            self.triggerUpdate(changes)
             return self.untrackedValue.length
         },
         splice(start, deleteCount, ...items) {
@@ -307,7 +395,7 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
                     ;(newValue != doesntExist) && self.adopt(index, newValue)
                 }
             }
-            changes.length && self.update(changes)
+            changes.length && self.triggerUpdate(changes)
             return output
         },
         // FIXME: maybe need to add all other array methods and return reactive versions of the results
@@ -325,7 +413,7 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
             if (valueBefore != doesntExist) {
                 self.disown(key)
             }
-            target[key] = newValue[isReactiveSymbol] || Reactive({initialValue: newValue})
+            target[key] = Reactive({initialValue: newValue})
             if (lengthBefore != target.length) {
                 changes.push([["length"], target.length, lengthBefore])
             }
@@ -334,40 +422,11 @@ Array.prototype[makeReactiveSymbol] = (value, self) => {
                 changes.push([[key], target[key], valueBefore ])
             }
             self.adopt(key, target[key])
-            self.update(changes)
+            self.triggerUpdate(changes)
         },
         delete(target, key) {
             self.disown(key)
             delete target[key]
-        },
-    })
-    
-    return self.$
-}
-
-Object.prototype[makeReactiveSymbol] = (value, self) => {
-    
-    for (const [key, each] of Object.entries(value)) {
-        self.adopt(key, each[isReactiveSymbol] || Reactive({initialValue: each}))
-    }
-    
-    // wrap an object
-    self.$ = new Proxy(self.children, {
-        set(target, key, newValue) {
-            const valueBefore = key in target ? target[key] : doesntExist
-            // if the value existed, disown it
-            if (valueBefore != doesntExist) {
-                self.disown(key)
-            }
-            target[key] = newValue[isReactiveSymbol] || Reactive({initialValue: newValue})
-            if (valueBefore !== target[key]) {
-                changes.push([[key], target[key], valueBefore ])
-            }
-            self.adopt(key, target[key])
-            self.update(changes)
-        },
-        delete(target, key) {
-            self.disown(key)
         },
     })
     
