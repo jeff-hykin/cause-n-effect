@@ -1,7 +1,6 @@
 const isReactiveSymbol   = Symbol("is-reactive")
 const makeReactiveSymbol = Symbol("make-reactive")
 const doesntExist        = Symbol("doesnt-exist")
-
 // 
 // Object watcher
 // 
@@ -17,8 +16,6 @@ Object.prototype[makeReactiveSymbol] = (value, theReactiveItem) => {
             return Reflect.get(original, key, ...args)
         },
         set(original, key, newValue) {
-            console.debug(`key is:`,key)
-            console.debug(`newValue is:`,newValue)
             const oldValue = key in original ? original[key] : doesntExist
             // if its a new value, disown the old one
             let shouldTriggerUpdate = false
@@ -32,6 +29,7 @@ Object.prototype[makeReactiveSymbol] = (value, theReactiveItem) => {
             shouldTriggerUpdate && theReactiveItem.triggerUpdate([
                 [[key], original[key], oldValue ]
             ])
+            return true
         },
         delete(original, key) {
             const oldValue = key in original ? original[key] : doesntExist
@@ -437,3 +435,5 @@ function isPrimitive(value) {
     const type = typeof value
     return value == null || !(type === 'object' || type === 'function')
 }
+
+module.exports = Reactive

@@ -1,8 +1,8 @@
 {
     "name": "cause-n-effect",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "description": "Listen to nested data changes",
-    "main": "index.js",
+    "main": "main.js",
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1"
     },
@@ -17,13 +17,12 @@
         "changes"
     ],
     "author": "Jeff Hykin",
-    "license": "ISC",
+    "license": "MIT",
     "bugs": {
         "url": "https://github.com/jeff-hykin/cause-n-effect/issues"
     },
     "homepage": "https://github.com/jeff-hykin/cause-n-effect#readme",
     "private": false,
     "dependencies": {
-        "lodash": "^4.17.21"
     }
 }
